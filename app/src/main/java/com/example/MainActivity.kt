@@ -130,7 +130,7 @@ fun BacaDuluApp(
     pendingInspection?.let { inspection ->
         DuplicateCompareDialog(
             inspection = inspection,
-            onConfirmOverwrite = { viewModel.confirmImportOverwrite() },
+            onConfirmOverwrite = { viewModel.confirmImportOverwrite(context) },
             onDismiss = { viewModel.dismissInspectionDialog() }
         )
     }

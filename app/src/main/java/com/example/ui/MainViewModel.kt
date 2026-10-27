@@ -217,32 +217,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun onFileSelectedForImport(context: Context, uri: Uri) {
         viewModelScope.launch {
             _isProcessingImport.value = true
-            _importStatusMessage.value = "Membuka dan memeriksa file backup..."
+            _importStatusMessage.value = "Memeriksa file backup..."
             try {
-                val inputStream = context.contentResolver.openInputStream(uri)
-                if (inputStream == null) {
-                    _userMessage.emit("Gagal membaca file dari penyimpanan.")
-                    return@launch
-                }
+                var fileName = "filebackup.db"
+                try {
+                    val cursor = context.contentResolver.query(uri, null, null, null, null)
+                    cursor?.use {
+                        if (it.moveToFirst()) {
+                            val nameIdx = it.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                            if (nameIdx != -1) {
+                                fileName = it.getString(nameIdx) ?: "filebackup.db"
+                            }
+                        }
+                    }
+                } catch (_: Exception) {}
 
-                val inspection = repository.inspectBackupStream(inputStream) { count, stage ->
-                    _importStatusMessage.value = "$stage ($count pos)"
-                }
-
-                if (inspection.incomingPosts.isEmpty()) {
-                    _userMessage.emit("Tidak ditemukan data pos WordPress pada file ini.")
-                    return@launch
-                }
+                val inspection = repository.inspectBackupFile(context, uri, fileName)
 
                 if (inspection.existingSite != null) {
-                    // Show comparison dialog
                     _pendingInspection.value = inspection
                 } else {
-                    // Direct import for new site
-                    executeImportFinal(inspection, overwrite = false)
+                    executeStreamImport(context, inspection, overwrite = false)
                 }
             } catch (e: Exception) {
-                _userMessage.emit("Gagal mengimpor file: ${e.localizedMessage ?: "Format tidak didukung"}")
+                _userMessage.emit("Gagal membaca file: ${e.localizedMessage ?: "Format tidak didukung"}")
             } finally {
                 _isProcessingImport.value = false
                 _importStatusMessage.value = null
@@ -257,10 +255,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 val inspection = repository.inspectDemoData()
                 if (inspection.existingSite != null) {
-                    // Show comparison dialog
                     _pendingInspection.value = inspection
                 } else {
-                    executeImportFinal(inspection, overwrite = false)
+                    executeDemoImport(overwrite = false)
                 }
             } catch (e: Exception) {
                 _userMessage.emit("Gagal memuat data contoh: ${e.message}")
@@ -271,11 +268,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun confirmImportOverwrite() {
+    fun confirmImportOverwrite(context: Context) {
         val inspection = _pendingInspection.value ?: return
         _pendingInspection.value = null
         viewModelScope.launch {
-            executeImportFinal(inspection, overwrite = true)
+            if (inspection.isDemo) {
+                executeDemoImport(overwrite = true)
+            } else {
+                executeStreamImport(context, inspection, overwrite = true)
+            }
         }
     }
 
@@ -286,23 +287,44 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private suspend fun executeImportFinal(inspection: BackupInspection, overwrite: Boolean) {
+    private suspend fun executeStreamImport(context: Context, inspection: BackupInspection, overwrite: Boolean) {
+        val uri = inspection.fileUri ?: return
         _isProcessingImport.value = true
-        _importStatusMessage.value = "Menyimpan ke database lokal..."
-        _importProgress.value = Pair(0, inspection.incomingPosts.size)
+        _importStatusMessage.value = "Memulai impor streaming..."
         try {
-            val totalSaved = repository.executeImport(
-                siteUrl = inspection.siteUrl,
-                posts = inspection.incomingPosts,
-                overwrite = overwrite
-            ) { count, total ->
-                _importProgress.value = Pair(count, total)
-                _importStatusMessage.value = "Menyimpan pos ($count/$total)..."
-            }
+            val totalSaved = repository.streamImportBackup(
+                context = context,
+                uri = uri,
+                siteUrlHint = inspection.siteUrl,
+                overwrite = overwrite,
+                onStatus = { status -> _importStatusMessage.value = status },
+                onProgress = { count ->
+                    _importProgress.value = Pair(count, 0)
+                    _importStatusMessage.value = "Menyimpan pos novel: $count pos tersimpan"
+                }
+            )
             _userMessage.emit("Berhasil mengimpor $totalSaved pos untuk ${inspection.siteUrl}")
             refreshRandomPosts()
         } catch (e: Exception) {
             _userMessage.emit("Gagal menyimpan ke database: ${e.localizedMessage}")
+        } finally {
+            _isProcessingImport.value = false
+            _importProgress.value = null
+            _importStatusMessage.value = null
+        }
+    }
+
+    private suspend fun executeDemoImport(overwrite: Boolean) {
+        _isProcessingImport.value = true
+        _importStatusMessage.value = "Menyimpan pos contoh..."
+        try {
+            val totalSaved = repository.importDemoData(overwrite) { count ->
+                _importProgress.value = Pair(count, count)
+            }
+            _userMessage.emit("Berhasil memuat $totalSaved pos contoh")
+            refreshRandomPosts()
+        } catch (e: Exception) {
+            _userMessage.emit("Gagal menyimpan demo: ${e.localizedMessage}")
         } finally {
             _isProcessingImport.value = false
             _importProgress.value = null

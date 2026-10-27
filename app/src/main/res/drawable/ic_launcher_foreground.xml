@@ -3,6 +3,6 @@
     <item
         android:width="66dp"
         android:height="66dp"
-        android:drawable="@drawable/ic_bacadulu_redblue_1793107951534"
+        android:drawable="@drawable/ic_bacadulu_modern_1793112503195"
         android:gravity="center" />
 </layer-list>

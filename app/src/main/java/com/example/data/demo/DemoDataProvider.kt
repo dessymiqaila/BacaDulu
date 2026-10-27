@@ -1,13 +1,17 @@
 package com.example.data.demo
 
-import com.example.data.parser.DumpScanResult
 import com.example.data.parser.ParsedPost
+
+data class DemoSiteData(
+    val siteUrl: String,
+    val posts: List<ParsedPost>
+)
 
 object DemoDataProvider {
 
     const val DEMO_SITE_URL = "kuliner-nusantara.net"
 
-    fun getDemoBackupData(): DumpScanResult {
+    fun getDemoBackupData(): DemoSiteData {
         val posts = listOf(
             ParsedPost(
                 originalId = 101,
@@ -201,7 +205,7 @@ object DemoDataProvider {
             )
         )
 
-        return DumpScanResult(
+        return DemoSiteData(
             siteUrl = DEMO_SITE_URL,
             posts = posts
         )

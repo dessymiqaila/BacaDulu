@@ -21,16 +21,16 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
-import java.io.InputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
 data class BackupInspection(
     val siteUrl: String,
-    val incomingPosts: List<ParsedPost>,
     val existingSite: SiteEntity?,
-    val existingPostsCount: Int
+    val existingPostsCount: Int,
+    val fileUri: Uri? = null,
+    val isDemo: Boolean = false
 )
 
 class ArchiveRepository(
@@ -89,22 +89,27 @@ class ArchiveRepository(
     }
 
     /**
-     * Inspects backup input stream, extracts siteurl and counts incoming posts,
-     * checking against existing database records for duplicate prevention.
+     * Inspects backup file header lightly without loading heavy post content into memory.
+     * Prevents OOM during inspection of large files with 5000+ posts.
      */
-    suspend fun inspectBackupStream(
-        inputStream: InputStream,
-        onProgress: (Int, String) -> Unit = { _, _ -> }
+    suspend fun inspectBackupFile(
+        context: Context,
+        uri: Uri,
+        fileName: String
     ): BackupInspection = withContext(Dispatchers.IO) {
-        val scan = WordPressDumpParser.parseDump(inputStream, onProgress)
-        val existingSite = dao.getSiteByUrl(scan.siteUrl)
+        val detectedSiteUrl = context.contentResolver.openInputStream(uri)?.use { stream ->
+            WordPressDumpParser.quickScanSiteUrl(stream, fileName.substringBeforeLast('.'))
+        } ?: WordPressDumpParser.cleanSiteUrl(fileName.substringBeforeLast('.'))
+
+        val existingSite = dao.getSiteByUrl(detectedSiteUrl)
         val existingCount = if (existingSite != null) dao.getPostsCountForSite(existingSite.id) else 0
 
         BackupInspection(
-            siteUrl = scan.siteUrl,
-            incomingPosts = scan.posts,
+            siteUrl = detectedSiteUrl,
             existingSite = existingSite,
-            existingPostsCount = existingCount
+            existingPostsCount = existingCount,
+            fileUri = uri,
+            isDemo = false
         )
     }
 
@@ -112,75 +117,132 @@ class ArchiveRepository(
      * Inspects demo data for testing
      */
     suspend fun inspectDemoData(): BackupInspection = withContext(Dispatchers.IO) {
-        val scan = DemoDataProvider.getDemoBackupData()
-        val existingSite = dao.getSiteByUrl(scan.siteUrl)
+        val demoUrl = DemoDataProvider.DEMO_SITE_URL
+        val existingSite = dao.getSiteByUrl(demoUrl)
         val existingCount = if (existingSite != null) dao.getPostsCountForSite(existingSite.id) else 0
 
         BackupInspection(
-            siteUrl = scan.siteUrl,
-            incomingPosts = scan.posts,
+            siteUrl = demoUrl,
             existingSite = existingSite,
-            existingPostsCount = existingCount
+            existingPostsCount = existingCount,
+            fileUri = null,
+            isDemo = true
         )
     }
 
     /**
-     * Executes the actual import in batch transactions
+     * Streams and saves posts in memory-efficient batches directly to SQLite.
+     * Completely prevents OOM and transaction crash on 5000+ novel chapter dumps.
      */
-    suspend fun executeImport(
-        siteUrl: String,
-        posts: List<ParsedPost>,
+    suspend fun streamImportBackup(
+        context: Context,
+        uri: Uri,
+        siteUrlHint: String,
         overwrite: Boolean,
-        onProgress: (insertedCount: Int, totalCount: Int) -> Unit = { _, _ -> }
+        onStatus: (String) -> Unit,
+        onProgress: (Int) -> Unit
     ): Int = withContext(Dispatchers.IO) {
-        database.withTransaction {
-            val existing = dao.getSiteByUrl(siteUrl)
-            val siteId = if (existing != null) {
-                if (overwrite) {
-                    dao.deletePostsBySiteId(existing.id)
-                    dao.updateSite(
-                        existing.copy(
-                            totalPosts = posts.size,
-                            importedAt = System.currentTimeMillis()
-                        )
+        var targetSiteId = -1
+        var finalSiteUrl = siteUrlHint
+
+        val totalSaved = WordPressDumpParser.streamParseAndSave(
+            context = context,
+            uri = uri,
+            fallbackName = siteUrlHint,
+            onSiteIdentified = { identifiedUrl ->
+                finalSiteUrl = identifiedUrl
+                // Prepare or fetch site record
+                val existing = dao.getSiteByUrl(finalSiteUrl)
+                if (existing != null) {
+                    if (overwrite) {
+                        dao.deletePostsBySiteId(existing.id)
+                        dao.updateSite(existing.copy(importedAt = System.currentTimeMillis()))
+                    }
+                    targetSiteId = existing.id
+                } else {
+                    val newSite = SiteEntity(
+                        siteUrl = finalSiteUrl,
+                        totalPosts = 0,
+                        importedAt = System.currentTimeMillis()
                     )
+                    targetSiteId = dao.insertSite(newSite).toInt()
                 }
-                existing.id
-            } else {
-                val newSite = SiteEntity(
-                    siteUrl = siteUrl,
-                    totalPosts = posts.size,
-                    importedAt = System.currentTimeMillis()
-                )
-                dao.insertSite(newSite).toInt()
-            }
-
-            // Batch insert posts (chunk size 100)
-            val chunkSize = 100
-            var insertedTotal = 0
-
-            posts.chunked(chunkSize).forEach { chunk ->
-                val entities = chunk.map { p ->
-                    PostEntity(
-                        siteId = siteId,
-                        uniqueKey = "$siteUrl-${p.originalId}",
-                        originalId = p.originalId,
-                        postTitle = p.postTitle,
-                        postContent = p.postContent,
-                        postDate = p.postDate,
-                        isBookmarked = 0,
-                        bookmarkedAt = null
-                    )
+            },
+            onBatchReady = { batch, totalSoFar ->
+                if (targetSiteId != -1 && batch.isNotEmpty()) {
+                    saveBatchToDb(targetSiteId, finalSiteUrl, batch)
+                    onProgress(totalSoFar)
                 }
-                dao.insertPosts(entities)
-                insertedTotal += entities.size
-                onProgress(insertedTotal, posts.size)
-            }
+            },
+            onStatus = onStatus
+        )
 
-            // Ensure site total_posts is accurate
-            val actualCount = dao.getPostsCountForSite(siteId)
-            dao.updateSiteTotalPosts(siteId, actualCount)
-            actualCount
+        if (targetSiteId != -1) {
+            val count = dao.getPostsCountForSite(targetSiteId)
+            dao.updateSiteTotalPosts(targetSiteId, count)
+        }
+
+        totalSaved
+    }
+
+    /**
+     * Imports demo data in safe batches
+     */
+    suspend fun importDemoData(
+        overwrite: Boolean,
+        onProgress: (Int) -> Unit
+    ): Int = withContext(Dispatchers.IO) {
+        val demo = DemoDataProvider.getDemoBackupData()
+        val existing = dao.getSiteByUrl(demo.siteUrl)
+        val siteId = if (existing != null) {
+            if (overwrite) {
+                dao.deletePostsBySiteId(existing.id)
+                dao.updateSite(existing.copy(importedAt = System.currentTimeMillis()))
+            }
+            existing.id
+        } else {
+            val newSite = SiteEntity(
+                siteUrl = demo.siteUrl,
+                totalPosts = demo.posts.size,
+                importedAt = System.currentTimeMillis()
+            )
+            dao.insertSite(newSite).toInt()
+        }
+
+        saveBatchToDb(siteId, demo.siteUrl, demo.posts)
+        onProgress(demo.posts.size)
+        val count = dao.getPostsCountForSite(siteId)
+        dao.updateSiteTotalPosts(siteId, count)
+        count
+    }
+
+    private suspend fun saveBatchToDb(
+        siteId: Int,
+        siteUrl: String,
+        posts: List<ParsedPost>
+    ) {
+        val entities = posts.map { p ->
+            PostEntity(
+                siteId = siteId,
+                uniqueKey = "$siteUrl-${p.originalId}",
+                originalId = p.originalId,
+                postTitle = p.postTitle,
+                postContent = p.postContent,
+                postDate = p.postDate,
+                isBookmarked = 0,
+                bookmarkedAt = null,
+                lastReadAt = null
+            )
+        }
+        try {
+            dao.insertPosts(entities)
+        } catch (e: Exception) {
+            // Fallback: insert individually if any single row has encoding conflict
+            for (item in entities) {
+                try {
+                    dao.insertPosts(listOf(item))
+                } catch (_: Exception) {}
+            }
         }
     }
 
@@ -189,7 +251,6 @@ class ArchiveRepository(
      */
     suspend fun exportDatabaseToDownloads(context: Context): Result<String> = withContext(Dispatchers.IO) {
         try {
-            // Checkpoint database to flush WAL
             val dbFile = context.getDatabasePath(BacaDuluDatabase.DATABASE_NAME)
             if (!dbFile.exists()) {
                 return@withContext Result.failure(Exception("File database belum dibuat."))

@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -90,7 +89,7 @@ fun DuplicateCompareDialog(
                             .padding(14.dp)
                     ) {
                         Text(
-                            text = "Perbandingan Jumlah Pos:",
+                            text = "Status Database Lokal:",
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.primary
@@ -119,11 +118,11 @@ fun DuplicateCompareDialog(
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Text(
-                                text = "File Backup Baru:",
+                                text = "Tindakan Timpa:",
                                 style = MaterialTheme.typography.bodySmall
                             )
                             Text(
-                                text = "${inspection.incomingPosts.size} pos",
+                                text = "Ganti dengan backup baru",
                                 style = MaterialTheme.typography.bodySmall,
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.primary
