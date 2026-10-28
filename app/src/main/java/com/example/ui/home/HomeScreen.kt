@@ -105,7 +105,7 @@ fun HomeScreen(
                                 }
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Text(
-                                    text = "15 pos acak dari database situs Anda",
+                                    text = "20 pos acak dari database situs Anda",
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.onPrimaryContainer
                                 )

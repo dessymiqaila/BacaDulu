@@ -16,6 +16,10 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.em
 import androidx.core.text.HtmlCompat
 
+data class FormattedParagraph(
+    val segments: List<AnnotatedString>
+)
+
 object HtmlContentFormatter {
 
     /**
@@ -46,6 +50,51 @@ object HtmlContentFormatter {
         text = text.replace(Regex("""<p>\s*</p>""", RegexOption.IGNORE_CASE), "")
 
         return text.trim()
+    }
+
+    /**
+     * Parses HTML into structured paragraphs and <br> segments so that:
+     * - paragraphSpacingDp can be applied between <p> paragraphs
+     * - lineBreakSpacingDp can be applied between <br/> line breaks
+     * - lineHeightSp can be applied to standard non-HTML line wrapping
+     */
+    fun parseContentToParagraphs(rawHtml: String, defaultTextColor: Color): List<FormattedParagraph> {
+        val cleaned = cleanHtmlForDisplay(rawHtml)
+        if (cleaned.isBlank()) return emptyList()
+
+        val rawParagraphs: List<String> = if (cleaned.contains("<p", ignoreCase = true)) {
+            cleaned.split(Regex("""</p>""", RegexOption.IGNORE_CASE))
+                .map { it.replace(Regex("""<p[^>]*>""", RegexOption.IGNORE_CASE), "").trim() }
+                .filter { it.isNotBlank() }
+        } else {
+            cleaned.split(Regex("""\r?\n\s*\r?\n"""))
+                .map { it.trim() }
+                .filter { it.isNotBlank() }
+        }
+
+        val result = mutableListOf<FormattedParagraph>()
+
+        for (para in rawParagraphs) {
+            // Split by <br> or <br/> or single newline
+            val rawSegments = para.split(Regex("""<br\s*/?>|\r?\n""", RegexOption.IGNORE_CASE))
+            val segments = mutableListOf<AnnotatedString>()
+
+            for (seg in rawSegments) {
+                val trimmed = seg.trim()
+                if (trimmed.isNotEmpty()) {
+                    val annotated = htmlToAnnotatedString(trimmed, defaultTextColor)
+                    if (annotated.isNotBlank()) {
+                        segments.add(annotated)
+                    }
+                }
+            }
+
+            if (segments.isNotEmpty()) {
+                result.add(FormattedParagraph(segments))
+            }
+        }
+
+        return result
     }
 
     /**

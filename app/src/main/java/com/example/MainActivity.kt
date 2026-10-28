@@ -155,6 +155,9 @@ fun BacaDuluApp(
             onFontSizeSet = { size -> viewModel.setFontSize(size) },
             onThemeSelected = { preset -> viewModel.setThemePreset(preset) },
             onTextColorSelected = { color -> viewModel.setTextColor(color) },
+            onParagraphSpacingSet = { sp -> viewModel.setParagraphSpacing(sp) },
+            onLineBreakSpacingSet = { sp -> viewModel.setLineBreakSpacing(sp) },
+            onLineHeightSet = { sp -> viewModel.setLineHeight(sp) },
             onResetSettings = { viewModel.resetReaderSettings() }
         )
     } else {
@@ -165,10 +168,10 @@ fun BacaDuluApp(
                     title = {
                         Text(
                             text = when (currentScreen) {
-                                is Screen.Home -> "BacaDulu"
+                                is Screen.Home -> "Saidz Rehulka"
                                 is Screen.SearchBookmark -> "Cari & Bookmark"
                                 is Screen.ManageSites -> "Kelola Arsip"
-                                else -> "BacaDulu"
+                                else -> "Saidz Rehulka"
                             },
                             fontWeight = FontWeight.Bold
                         )

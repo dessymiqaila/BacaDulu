@@ -1,12 +1,11 @@
 package com.example.ui.components
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -26,7 +25,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
@@ -43,6 +41,13 @@ fun PostCardItem(
     onBookmarkToggle: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val bg = MaterialTheme.colorScheme.background
+    val isDark = (0.299 * bg.red + 0.587 * bg.green + 0.114 * bg.blue) < 0.5
+
+    val cardBg = if (isDark) Color(0xFF000000) else Color(0xFFFFFFFF)
+    val textColor = if (isDark) Color(0xFFFFFFFF) else Color(0xFF000000)
+    val cardBorder = if (isDark) Color(0xFF262626) else Color(0xFFE5E7EB)
+
     Card(
         modifier = modifier
             .fillMaxWidth()
@@ -50,8 +55,9 @@ fun PostCardItem(
             .clickable(onClick = onClick),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+            containerColor = cardBg
         ),
+        border = BorderStroke(1.dp, cardBorder),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
         Row(
@@ -60,7 +66,7 @@ fun PostCardItem(
                 .height(IntrinsicSize.Min),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Cool accent indicator bar on the left
+            // Accent bar on the left
             Box(
                 modifier = Modifier
                     .width(5.dp)
@@ -85,7 +91,7 @@ fun PostCardItem(
                     letterSpacing = 0.15.sp
                 ),
                 fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurface,
+                color = textColor,
                 maxLines = 3,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier
@@ -104,7 +110,7 @@ fun PostCardItem(
                 Icon(
                     imageVector = if (post.isBookmarked == 1) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
                     contentDescription = if (post.isBookmarked == 1) "Hapus Bookmark" else "Simpan Bookmark",
-                    tint = if (post.isBookmarked == 1) Color(0xFFEAB308) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                    tint = if (post.isBookmarked == 1) Color(0xFFEAB308) else (if (isDark) Color(0xFF888888) else Color(0xFF777777))
                 )
             }
         }

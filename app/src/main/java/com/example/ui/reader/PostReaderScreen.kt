@@ -5,9 +5,11 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -29,6 +31,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.NavigateBefore
+import androidx.compose.material.icons.automirrored.filled.NavigateNext
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Code
@@ -44,7 +48,6 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -60,11 +63,16 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -94,6 +102,9 @@ fun PostReaderScreen(
     onFontSizeSet: (Float) -> Unit,
     onThemeSelected: (ReaderThemePreset) -> Unit,
     onTextColorSelected: (Color) -> Unit,
+    onParagraphSpacingSet: (Float) -> Unit,
+    onLineBreakSpacingSet: (Float) -> Unit,
+    onLineHeightSet: (Float) -> Unit,
     onResetSettings: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -105,11 +116,20 @@ fun PostReaderScreen(
     val scrollState = rememberScrollState()
     val coroutineScope = rememberCoroutineScope()
 
-    val formattedContent = remember(post?.postContent, textColor) {
+    // Double tap Quick HUD state (< ^ >)
+    var showQuickHud by remember { mutableStateOf(false) }
+
+    // Disappear automatically when scrolling
+    LaunchedEffect(scrollState.isScrollInProgress) {
+        if (scrollState.isScrollInProgress) {
+            showQuickHud = false
+        }
+    }
+
+    val parsedParagraphs = remember(post?.postContent, textColor) {
         if (post != null) {
-            val cleaned = HtmlContentFormatter.cleanHtmlForDisplay(post.postContent)
-            HtmlContentFormatter.htmlToAnnotatedString(cleaned, textColor)
-        } else null
+            HtmlContentFormatter.parseContentToParagraphs(post.postContent, textColor)
+        } else emptyList()
     }
 
     Scaffold(
@@ -183,6 +203,13 @@ fun PostReaderScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
                 .background(bgColor)
+                .pointerInput(Unit) {
+                    detectTapGestures(
+                        onDoubleTap = {
+                            showQuickHud = !showQuickHud
+                        }
+                    )
+                }
         ) {
             if (post == null) {
                 Box(
@@ -208,7 +235,7 @@ fun PostReaderScreen(
                         style = MaterialTheme.typography.headlineMedium.copy(
                             fontFamily = fontFamily,
                             fontSize = (readerSettings.fontSizeSp + 6).sp,
-                            lineHeight = (readerSettings.fontSizeSp + 14).sp
+                            lineHeight = (readerSettings.lineHeightSp + 10).sp
                         ),
                         fontWeight = FontWeight.Bold,
                         color = textColor
@@ -246,17 +273,25 @@ fun PostReaderScreen(
 
                     // Article Content
                     if (!showRawContent) {
-                        if (formattedContent != null) {
-                            Text(
-                                text = formattedContent,
-                                style = MaterialTheme.typography.bodyLarge.copy(
-                                    fontFamily = fontFamily,
-                                    fontSize = fontSize,
-                                    lineHeight = (readerSettings.fontSizeSp * 1.6f).sp
-                                ),
-                                color = textColor,
-                                modifier = Modifier.testTag("reader_formatted_content")
-                            )
+                        parsedParagraphs.forEachIndexed { pIndex, p ->
+                            p.segments.forEachIndexed { sIndex, segment ->
+                                Text(
+                                    text = segment,
+                                    style = MaterialTheme.typography.bodyLarge.copy(
+                                        fontFamily = fontFamily,
+                                        fontSize = fontSize,
+                                        lineHeight = readerSettings.lineHeightSp.sp
+                                    ),
+                                    color = textColor,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                                if (sIndex < p.segments.size - 1) {
+                                    Spacer(modifier = Modifier.height(readerSettings.lineBreakSpacingDp.dp))
+                                }
+                            }
+                            if (pIndex < parsedParagraphs.size - 1) {
+                                Spacer(modifier = Modifier.height(readerSettings.paragraphSpacingDp.dp))
+                            }
                         }
                     } else {
                         // Raw Unmodified HTML Mode
@@ -330,7 +365,7 @@ fun PostReaderScreen(
 
                     Spacer(modifier = Modifier.height(20.dp))
 
-                    // Non-floating Previous & Next Navigation Buttons right below content
+                    // Permanent navigation buttons at bottom of content
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(16.dp),
@@ -417,33 +452,79 @@ fun PostReaderScreen(
                         Text("Kembali ke Atas")
                     }
 
-                    Spacer(modifier = Modifier.height(48.dp))
+                    Spacer(modifier = Modifier.height(60.dp))
                 }
             }
 
-            // Quick Floating Action Button for Scroll to Top (appears when scrolled down)
+            // Quick Floating HUD Overlay on Double Tap (< ^ >)
             AnimatedVisibility(
-                visible = scrollState.value > 300,
+                visible = showQuickHud,
                 enter = fadeIn() + scaleIn(),
                 exit = fadeOut() + scaleOut(),
                 modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(20.dp)
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 32.dp)
+                    .testTag("floating_quick_nav_hud")
             ) {
-                FloatingActionButton(
-                    onClick = {
-                        coroutineScope.launch {
-                            scrollState.animateScrollTo(0)
-                        }
-                    },
-                    modifier = Modifier.testTag("fab_scroll_to_top"),
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    contentColor = MaterialTheme.colorScheme.onPrimary
+                Surface(
+                    shape = RoundedCornerShape(32.dp),
+                    color = if (readerSettings.themePreset == ReaderThemePreset.DARK) Color(0xFF1E293B).copy(alpha = 0.95f) else Color(0xFF0F172A).copy(alpha = 0.92f),
+                    contentColor = Color.White,
+                    shadowElevation = 12.dp,
+                    tonalElevation = 6.dp,
+                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.25f))
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.KeyboardArrowUp,
-                        contentDescription = "Scroll ke Atas"
-                    )
+                    Row(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        // < Previous
+                        IconButton(
+                            onClick = onPrevClick,
+                            enabled = prevPostId != null,
+                            modifier = Modifier.testTag("hud_prev_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.NavigateBefore,
+                                contentDescription = "Sebelumnya",
+                                tint = if (prevPostId != null) Color.White else Color.White.copy(alpha = 0.3f),
+                                modifier = Modifier.size(30.dp)
+                            )
+                        }
+
+                        // ^ Scroll to Top
+                        IconButton(
+                            onClick = {
+                                coroutineScope.launch {
+                                    scrollState.animateScrollTo(0)
+                                    showQuickHud = false
+                                }
+                            },
+                            modifier = Modifier.testTag("hud_totop_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.KeyboardArrowUp,
+                                contentDescription = "Kembali ke Atas",
+                                tint = Color.White,
+                                modifier = Modifier.size(30.dp)
+                            )
+                        }
+
+                        // > Next
+                        IconButton(
+                            onClick = onNextClick,
+                            enabled = nextPostId != null,
+                            modifier = Modifier.testTag("hud_next_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.NavigateNext,
+                                contentDescription = "Berikutnya",
+                                tint = if (nextPostId != null) Color.White else Color.White.copy(alpha = 0.3f),
+                                modifier = Modifier.size(30.dp)
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -461,6 +542,7 @@ fun PostReaderScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 20.dp, vertical = 8.dp)
+                    .verticalScroll(rememberScrollState())
                     .navigationBarsPadding()
             ) {
                 // Header
@@ -491,7 +573,7 @@ fun PostReaderScreen(
 
                 Spacer(modifier = Modifier.height(14.dp))
 
-                // Font Family Selector (Roboto, Serif, Monospace, Cursive, Default)
+                // Font Family Selector
                 Text(
                     text = "Pilihan Font",
                     style = MaterialTheme.typography.labelLarge,
@@ -517,7 +599,7 @@ fun PostReaderScreen(
 
                 // Font Size Controls
                 Text(
-                    text = "Ukuran Teks (${readerSettings.fontSizeSp.toInt()} sp)",
+                    text = "Ukuran Huruf (${readerSettings.fontSizeSp.toInt()} sp)",
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.SemiBold
                 )
@@ -555,6 +637,60 @@ fun PostReaderScreen(
                         Icon(imageVector = Icons.Default.Add, contentDescription = "Perbesar Huruf")
                     }
                 }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // 1. Paragraph Spacing (<p>)
+                Text(
+                    text = "Jarak Antar Paragraf <p> (${readerSettings.paragraphSpacingDp.toInt()} dp)",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Slider(
+                    value = readerSettings.paragraphSpacingDp,
+                    onValueChange = onParagraphSpacingSet,
+                    valueRange = 4f..36f,
+                    steps = 15,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("paragraph_spacing_slider")
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // 2. Line Break Spacing (<br/>)
+                Text(
+                    text = "Jarak Baris Baru <br/> (${readerSettings.lineBreakSpacingDp.toInt()} dp)",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Slider(
+                    value = readerSettings.lineBreakSpacingDp,
+                    onValueChange = onLineBreakSpacingSet,
+                    valueRange = 2f..24f,
+                    steps = 10,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("linebreak_spacing_slider")
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // 3. Line Height (non-HTML newlines / wrapping lines)
+                Text(
+                    text = "Tinggi Baris / Line Height (${readerSettings.lineHeightSp.toInt()} sp)",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Slider(
+                    value = readerSettings.lineHeightSp,
+                    onValueChange = onLineHeightSet,
+                    valueRange = 18f..42f,
+                    steps = 11,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("line_height_slider")
+                )
 
                 Spacer(modifier = Modifier.height(14.dp))
 
@@ -630,7 +766,7 @@ fun PostReaderScreen(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(18.dp))
+                Spacer(modifier = Modifier.height(24.dp))
             }
         }
     }

@@ -391,6 +391,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
+    fun setParagraphSpacing(value: Float) {
+        _readerSettings.value = _readerSettings.value.copy(paragraphSpacingDp = value.coerceIn(4f, 40f))
+    }
+
+    fun setLineBreakSpacing(value: Float) {
+        _readerSettings.value = _readerSettings.value.copy(lineBreakSpacingDp = value.coerceIn(2f, 30f))
+    }
+
+    fun setLineHeight(value: Float) {
+        _readerSettings.value = _readerSettings.value.copy(lineHeightSp = value.coerceIn(16f, 48f))
+    }
+
     fun clearReadingHistory() {
         viewModelScope.launch {
             repository.clearReadingHistory()

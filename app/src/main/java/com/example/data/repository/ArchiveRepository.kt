@@ -75,6 +75,7 @@ class ArchiveRepository(
 
     suspend fun recordPostRead(postId: Int) = withContext(Dispatchers.IO) {
         dao.updateLastRead(postId, System.currentTimeMillis())
+        dao.pruneOldHistory()
     }
 
     suspend fun clearReadingHistory() = withContext(Dispatchers.IO) {

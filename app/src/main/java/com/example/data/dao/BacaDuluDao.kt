@@ -50,7 +50,7 @@ interface BacaDuluDao {
         FROM posts
         INNER JOIN sites ON posts.site_id = sites.id
         ORDER BY RANDOM()
-        LIMIT 15
+        LIMIT 20
     """)
     suspend fun getRandom15Posts(): List<PostWithSite>
 
@@ -62,7 +62,7 @@ interface BacaDuluDao {
         INNER JOIN sites ON posts.site_id = sites.id
         WHERE (:query = '' OR posts.post_title LIKE '%' || :query || '%')
         ORDER BY posts.post_title COLLATE NOCASE ASC
-        LIMIT 300
+        LIMIT 20
     """)
     fun searchPostsAlphabetical(query: String): Flow<List<PostWithSite>>
 
@@ -122,6 +122,19 @@ interface BacaDuluDao {
 
     @Query("UPDATE posts SET last_read_at = :timestamp WHERE id = :postId")
     suspend fun updateLastRead(postId: Int, timestamp: Long)
+
+    @Query("""
+        UPDATE posts
+        SET last_read_at = NULL
+        WHERE last_read_at IS NOT NULL
+        AND id NOT IN (
+            SELECT id FROM posts
+            WHERE last_read_at IS NOT NULL
+            ORDER BY last_read_at DESC
+            LIMIT 100
+        )
+    """)
+    suspend fun pruneOldHistory()
 
     @Query("UPDATE posts SET last_read_at = NULL")
     suspend fun clearReadingHistory()
